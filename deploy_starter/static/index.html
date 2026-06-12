@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>邮箱待办助手</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div class="container" id="mainContainer">
+        <div class="header">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h1>📧 邮箱待办助手</h1>
+                <div style="display: flex; align-items: center;">
+                    <div class="zoom-controls">
+                        <button onclick="zoomOut()" title="缩小">➖</button>
+                        <span id="zoomLevel">100%</span>
+                        <button onclick="zoomIn()" title="放大">➕</button>
+                        <button onclick="zoomReset()" title="重置">↺</button>
+                    </div>
+                    <button class="settings-btn" onclick="openSettings()" title="设置">⚙</button>
+                    <button class="help-btn" id="helpBtn" onclick="openHelp()" title="帮助">❓</button>
+                </div>
+            </div>
+            <div class="config-form">
+                <input type="email" id="email" placeholder="邮箱地址" value="">
+                <input type="password" id="password" placeholder="密码/授权码" value="">
+                <select id="emailProvider" style="padding: 8px; border-radius: 4px; border: 1px solid #ddd;">
+                    <option value="qq" selected>QQ邮箱</option>
+                    <option value="163">163邮箱</option>
+                    <option value="gmail">Gmail</option>
+                    <option value="outlook">Outlook</option>
+                    <option value="firefox">Firefox邮箱</option>
+                    <option value="custom">自定义</option>
+                </select>
+                <input type="text" id="pop3Server" placeholder="POP3服务器" value="pop.qq.com" style="width: 150px; display: none;">
+                <input type="number" id="pop3PortInput" placeholder="端口" value="995" style="width: 70px; display: none; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <label style="display: flex; align-items: center; font-size: 14px; cursor: pointer;">
+                    <input type="checkbox" id="savePassword" style="cursor: pointer; margin-right: 5px;">
+                    记住密码
+                </label>
+                <button class="sync-btn" id="syncBtn" onclick="syncEmails()">同步邮箱</button>
+                <button class="clear-btn" onclick="clearAllData()">清空数据</button>
+            </div>
+            <div class="status" id="status"></div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <div class="progress-container" id="progressContainer" style="flex: 1;">
+                    <div class="progress-bar" id="progressBar" style="width: 0%"></div>
+                </div>
+                <button id="cancelSyncBtn" onclick="cancelSync()" style="display: none; padding: 5px 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">取消</button>
+                <div class="auto-sync-countdown" id="autoSyncCountdown" style="font-size: 12px; color: #888; white-space: nowrap;"></div>
+            </div>
+            <div class="progress-text" id="progressText" style="display: none;"></div>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('list')">待办列表</button>
+            <button class="tab" onclick="switchTab('completed')">已完成</button>
+            <button class="tab" onclick="switchTab('calendar')">日历视图</button>
+            <button class="tab" onclick="switchTab('trash')">🗑️ 回收站</button>
+            <button class="tab" onclick="switchTab('forwarded')" id="tab-forwarded">📨 已转发<span id="forwardedBadge" style="display:none; margin-left:6px; padding:1px 7px; background:#dc3545; color:white; border-radius:10px; font-size:11px; vertical-align:middle;"></span></button>
+            <button class="tab" onclick="switchTab('forward')">📤 转发规则</button>
+            <button class="tab" onclick="switchTab('chat')">💬 聊天助手</button>
+        </div>
+
+        <!-- 待办列表页 -->
+        <div id="list-tab" class="tab-content active">
+            <div class="sub-tabs" style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">
+                <button class="sub-tab active" onclick="switchSubTab('with-due')" id="sub-tab-with-due" style="padding: 8px 16px; border: 1px solid #ddd; border-radius: 4px; background: #007bff; color: white; cursor: pointer;">有截止时间</button>
+                <button class="sub-tab" onclick="switchSubTab('no-due')" id="sub-tab-no-due" style="padding: 8px 16px; border: 1px solid #ddd; border-radius: 4px; background: #f8f9fa; color: #333; cursor: pointer;">无截止时间</button>
+                <button id="noDueSortBtn" onclick="toggleNoDueSort()" style="display: none; padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; background: #f8f9fa; color: #666; cursor: pointer; font-size: 13px;" title="切换排序方向">📧 发件时间 ↑</button>
+            </div>
+            <div id="todos-list" class="loading">加载中...</div>
+        </div>
+
+        <!-- 已完成列表页 -->
+        <div id="completed-tab" class="tab-content">
+            <div id="completed-list" class="loading">加载中...</div>
+        </div>
+
+        <!-- 日历视图页 -->
+        <div id="calendar-tab" class="tab-content">
+            <div class="calendar-nav">
+                <button class="calendar-nav-btn" onclick="prevMonth()">← 上个月</button>
+                <h2 id="calendar-title"></h2>
+                <button class="calendar-nav-btn" onclick="nextMonth()">下个月 →</button>
+            </div>
+            <div id="calendar-view"></div>
+        </div>
+
+        <!-- 回收站页 -->
+        <div id="trash-tab" class="tab-content">
+            <div id="trash-list" class="loading">加载中...</div>
+        </div>
+
+        <!-- 已转发邮件页（知会流） -->
+        <div id="forwarded-tab" class="tab-content">
+            <div style="margin-bottom: 12px; padding: 10px 12px; background: #e8f4fd; border-left: 3px solid #2196f3; border-radius: 4px; font-size: 13px; color: #555; line-height: 1.6;">
+                这里是<strong>命中转发规则、已发送给他人</strong>的邮件清单。这些事项你不必亲自处理，但可以在这里查看转发去向、知悉进展。
+            </div>
+            <div class="sub-tabs" style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">
+                <button class="sub-tab" onclick="switchForwardedSubTab('unread')" id="fwd-sub-unread" style="padding: 8px 16px; border: 1px solid #ddd; border-radius: 4px; background: #007bff; color: white; cursor: pointer;">未读</button>
+                <button class="sub-tab" onclick="switchForwardedSubTab('all')" id="fwd-sub-all" style="padding: 8px 16px; border: 1px solid #ddd; border-radius: 4px; background: #f8f9fa; color: #333; cursor: pointer;">全部</button>
+                <button onclick="markAllForwardedRead()" id="fwdMarkAllBtn" style="margin-left: auto; padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; background: #f8f9fa; color: #666; cursor: pointer; font-size: 13px;" title="把所有未读条目标为已读">全部标为已读</button>
+            </div>
+            <div id="forwarded-list" class="loading">加载中...</div>
+        </div>
+
+        <!-- 转发规则页 -->
+        <div id="forward-tab" class="tab-content">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h3 style="margin: 0;">📤 智能转发规则</h3>
+                <button class="sync-btn" onclick="showAddRuleModal()" style="background: #007bff;">+ 添加规则</button>
+            </div>
+            <div style="margin-bottom: 15px; padding: 12px; background: #e3f2fd; border-radius: 8px; font-size: 13px; color: #555; line-height: 1.8;">
+                <strong>功能说明：</strong>使用AI大模型理解自然语言规则，当邮件内容满足规则时自动转发给指定收件人。例如："转发与财务报销相关的邮件给张三"。需先在设置中配置SMTP发送邮箱。
+            </div>
+            <div id="forward-rules-list" class="loading">加载中...</div>
+        </div>
+
+        <!-- 聊天助手页 -->
+        <div id="chat-tab" class="tab-content">
+            <div class="chat-container">
+                <!-- 顶部工具栏 -->
+                <div class="chat-toolbar">
+                    <div class="chat-toolbar-left">
+                        <label class="memory-toggle">
+                            <input type="checkbox" id="chatMemoryToggle" onchange="toggleChatMemory()">
+                            <span class="memory-toggle-label">记忆</span>
+                        </label>
+                        <span class="memory-hint" id="memoryHint">（关闭时不保存聊天记录）</span>
+                    </div>
+                    <button class="chat-clear-btn" onclick="clearChatHistory()">清除聊天</button>
+                </div>
+                
+                <!-- 消息列表 -->
+                <div class="chat-messages" id="chatMessages">
+                    <div class="chat-welcome">
+                        <p>👋 你好！我是待办助手，可以帮你查询和了解待办事项。</p>
+                        <p>试试问我：</p>
+                        <ul>
+                            <li onclick="askQuestion('我有多少个待办？')">我有多少个待办？</li>
+                            <li onclick="askQuestion('今天有哪些事情要做？')">今天有哪些事情要做？</li>
+                            <li onclick="askQuestion('哪些待办快到期了？')">哪些待办快到期了？</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <!-- 输入区域 -->
+                <div class="chat-input-area">
+                    <textarea id="chatInput" placeholder="输入你的问题..." rows="1" onkeydown="handleChatKeydown(event)"></textarea>
+                    <button class="chat-send-btn" id="chatSendBtn" onclick="sendChatMessage()">发送</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 详情弹窗 -->
+    <div class="modal-overlay" id="detailModal">
+        <div class="modal" style="max-width: 550px; max-height: 85vh; display: flex; flex-direction: column;">
+            <div class="modal-header" style="flex-shrink: 0;">
+                <h2>📝 待办详情</h2>
+                <button class="modal-close" onclick="closeDetailModal()">&times;</button>
+            </div>
+            <div style="flex: 1; overflow-y: auto; padding-right: 5px;">
+            <div class="form-group">
+                <label for="detailTitle">标题</label>
+                <input type="text" id="detailTitle" placeholder="待办标题">
+            </div>
+            <div class="form-group">
+                <label for="detailDescription">详情</label>
+                <textarea id="detailDescription" rows="4" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; resize: vertical;"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="detailDueDate">截止日期</label>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <input type="datetime-local" id="detailDueDate" style="padding: 10px; border: 1px solid #ddd; border-radius: 6px; flex: 1;">
+                    <button type="button" onclick="clearDueDate()" style="padding: 10px 15px; background: #6c757d; color: white; border: none; border-radius: 6px; cursor: pointer; white-space: nowrap;">清除</button>
+                </div>
+                <div class="hint" style="margin-top: 5px; font-size: 12px; color: #888;">留空或点击清除表示无截止日期</div>
+            </div>
+            <div class="form-group">
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="checkbox" id="detailCompleted" style="width: 18px; height: 18px; margin-right: 8px;">
+                    <span>已完成</span>
+                </label>
+            </div>
+            <div class="form-group" style="font-size: 12px; color: #888;">
+                <div>任务创建时间: <span id="detailCreatedAt"></span></div>
+            </div>
+            <div class="form-group" style="font-size: 12px; color: #666;">
+                <div style="margin-bottom: 8px;"><strong>📧 原邮件信息</strong></div>
+                <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px; padding: 10px; max-height: 250px; overflow-y: auto;">
+                    <div style="margin-bottom: 5px;"><strong>标题:</strong> <span id="detailSource"></span></div>
+                    <div style="margin-bottom: 5px;"><strong>发信人:</strong> <span id="detailFrom"></span></div>
+                    <div style="margin-bottom: 5px;"><strong>收件人:</strong> <span id="detailTo"></span></div>
+                    <div id="detailCcRow" style="margin-bottom: 5px; display: none;"><strong>抄送:</strong> <span id="detailCc"></span></div>
+                    <div style="margin-bottom: 8px;"><strong>邮件时间:</strong> <span id="detailEmailDate"></span></div>
+                    <div style="border-top: 1px solid #dee2e6; padding-top: 8px;">
+                        <strong>邮件正文:</strong>
+                        <pre id="detailEmailBody" style="margin: 5px 0 0 0; white-space: pre-wrap; word-wrap: break-word; font-family: inherit; font-size: 12px; color: #555;"></pre>
+                    </div>
+                </div>
+            </div>
+            </div><!-- 滚动区域结束 -->
+            <div class="modal-actions" style="justify-content: space-between; flex-shrink: 0; border-top: 1px solid #eee; padding-top: 15px; margin-top: 10px;">
+                <button class="btn-delete" id="detailDeleteBtn" onclick="deleteTodoFromDetail()" style="background: #dc3545; color: white; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer;">删除</button>
+                <div style="display: flex;">
+                    <button class="btn-cancel" onclick="closeDetailModal()" style="margin-right: 10px;">取消</button>
+                    <button class="btn-save" onclick="saveTodoDetail()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 设置模态框 -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal" style="max-width: 480px; max-height: 85vh; display: flex; flex-direction: column;">
+            <div class="modal-header" style="flex-shrink: 0;">
+                <h2>⚙ 设置</h2>
+                <button class="modal-close" onclick="closeSettings()">&times;</button>
+            </div>
+            <div style="flex: 1; overflow-y: auto;">
+            
+            <!-- 数据存储 -->
+            <div class="settings-section">
+                <div class="settings-section-title">📁 数据存储</div>
+                <div class="form-group">
+                    <label>数据目录</label>
+                    <div class="data-dir-display">
+                        <span id="dataDirPath" class="data-dir-path">加载中...</span>
+                        <button class="btn-open-dir" onclick="openDataDir()" title="打开目录">📂 打开</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="settings-divider"></div>
+            
+            <!-- 用户信息 -->
+            <div class="settings-section">
+                <div class="settings-section-title">👤 您的相关信息</div>
+                <div class="form-group">
+                    <label for="userNicknames">姓名/称呼/别名等</label>
+                    <input type="text" id="userNicknames" placeholder="例如：张三、张总、三哥、信息部成员">
+                    <div class="hint">
+                        用于判断哪些事项是您本人要处理的——请填写所有可能在邮件中出现、指代您的称呼或标识，例如：<br>
+                        <span style="color: #555;">・姓名全称、常用简称<br>
+                        ・昵称、同事间习惯称呼<br>
+                        ・职位或头衔（如“张经理”“人事专员”）<br>
+                        ・部门/团队称呼<br>
+                        ・工号、邮箱前缀等外部系统标识</span>
+                        <br><b>填写越详细，系统越能精准识别哪些事项需要您处理。</b>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="settings-divider"></div>
+            
+            <!-- 同步设置 -->
+            <div class="settings-section">
+                <div class="settings-section-title">🔄 同步设置</div>
+                <div class="form-group">
+                    <label for="autoSyncInterval">自动同步间隔（分钟）</label>
+                    <input type="number" id="autoSyncInterval" min="1" max="1440" value="1" style="width: 100px;">
+                    <div class="hint">设置自动同步邮件的时间间隔（1-1440分钟）</div>
+                </div>
+                <div class="form-group">
+                    <label for="maxEmailsPerSync">每次扫描最多邮件数</label>
+                    <input type="number" id="maxEmailsPerSync" min="10" max="1000" value="100" style="width: 100px;">
+                    <div class="hint">每次同步最多扫描多少封邮件（10-1000）</div>
+                </div>
+                <div class="form-group">
+                    <label style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="onlyRecent" style="width: 18px; height: 18px; margin-right: 8px;">
+                        <span>只同步7天内的邮件</span>
+                    </label>
+                    <div class="hint">勾选后只扫描最近7天内的邮件</div>
+                </div>
+            </div>
+            
+            <div class="settings-divider"></div>
+            
+            <!-- LLM设置 -->
+            <div class="settings-section">
+                <div class="settings-section-title">🤖 LLM 设置</div>
+                <div class="form-group">
+                    <label for="llmModel">模型名称 (Model)</label>
+                    <input type="text" id="llmModel" placeholder="默认: qwen-flash">
+                    <div class="hint">指定要使用的LLM模型</div>
+                </div>
+                <div class="form-group">
+                    <label for="llmBaseUrl">API Base URL</label>
+                    <input type="text" id="llmBaseUrl" placeholder="例如: https://api.openai.com/v1">
+                    <div class="hint">OpenAI兼容API的基础地址</div>
+                </div>
+                <div class="form-group">
+                    <label for="llmApiKey">API Key</label>
+                    <input type="password" id="llmApiKey" placeholder="sk-xxxxx">
+                </div>
+                <div class="form-group">
+                    <label for="llmTemperature">Temperature</label>
+                    <input type="number" id="llmTemperature" placeholder="留空使用API默认值" step="0.1" min="0" max="2">
+                    <div class="hint">控制输出随机性，0-2之间，留空使用API默认值</div>
+                </div>
+            </div>
+            
+            <div class="settings-divider"></div>
+            
+            <!-- SMTP 发送设置 -->
+            <div class="settings-section">
+                <div class="settings-section-title">📧 SMTP 发送设置</div>
+                <p style="margin: 0 0 10px 0; font-size: 12px; color: #888;">配置用于转发邮件的SMTP发送邮箱（转发功能需要）</p>
+                <div class="form-group">
+                    <label for="smtpServer">SMTP 服务器</label>
+                    <input type="text" id="smtpServer" placeholder="例如: smtp.qq.com">
+                </div>
+                <div class="form-group">
+                    <label for="smtpPort">SMTP 端口</label>
+                    <input type="number" id="smtpPort" value="465" min="1" max="65535" style="width: 100px;">
+                    <div class="hint">SSL通常用465，TLS通常用587</div>
+                </div>
+                <div class="form-group">
+                    <label style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="smtpSsl" checked style="width: 18px; height: 18px; margin-right: 8px;">
+                        <span>使用 SSL 加密</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label for="smtpEmail">发件邮箱地址</label>
+                    <input type="email" id="smtpEmail" placeholder="例如: your@email.com">
+                </div>
+                <div class="form-group">
+                    <label for="smtpPassword">发件邮箱密码/授权码</label>
+                    <input type="password" id="smtpPassword" placeholder="邮箱密码或SMTP授权码">
+                    <div class="hint">部分邮箱需要使用应用专用密码/授权码</div>
+                </div>
+                <div class="form-group">
+                    <label for="smtpSenderName">发件人显示名</label>
+                    <input type="text" id="smtpSenderName" placeholder="邮箱待办助手" value="邮箱待办助手">
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button type="button" onclick="testSmtpConnection()" style="padding: 8px 16px; background: #17a2b8; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">测试连接</button>
+                    <span id="smtpTestResult" style="font-size: 13px; line-height: 36px;"></span>
+                </div>
+            </div>
+            </div><!-- 滚动区域结束 -->
+            <div class="modal-actions" style="flex-shrink: 0; border-top: 1px solid #e0e0e0; padding: 15px 20px; background: white;">
+                <button class="btn-cancel" onclick="closeSettings()">取消</button>
+                <button class="btn-save" onclick="saveLLMSettings()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 帮助模态框 -->
+    <div class="modal-overlay" id="helpModal">
+        <div class="modal" style="width: 90%; max-width: 880px; max-height: 85vh; display: flex; flex-direction: column;">
+            <div class="modal-header" style="flex-shrink: 0;">
+                <h2>📖 使用指南</h2>
+                <button class="modal-close" onclick="closeHelp()">&times;</button>
+            </div>
+            <div style="flex: 1; overflow-y: auto; padding: 0 20px;">
+                
+                <!-- 首次使用 -->
+                <div class="settings-section">
+                    <div class="settings-section-title">🚀 首次使用</div>
+                    <p style="margin: 10px 0 5px 0; line-height: 1.8; color: #555;">
+                        <strong>第一步：点击右上角 ⚙ 进入设置</strong>
+                    </p>
+                    <ul style="margin: 5px 0 15px 0; padding-left: 20px; line-height: 2; color: #555;">
+                        <li><strong>LLM 设置</strong> — 配置 API Key 和模型（支持 OpenAI 兼容接口）</li>
+                        <li><strong>您的相关信息</strong> — 填写同事可能如何称呼您（名字、职位等），帮助 AI 更准确判断邮件相关性</li>
+                        <li><strong>同步设置</strong> — 可调整自动同步间隔、扫描邮件数量等</li>
+                    </ul>
+                    <p style="margin: 10px 0 5px 0; line-height: 1.8; color: #555;">
+                        <strong>第二步：同步邮箱</strong>
+                    </p>
+                    <ul style="margin: 5px 0; padding-left: 20px; line-height: 2; color: #555;">
+                        <li>在顶部输入您的<strong>邮箱地址</strong>和<strong>密码/授权码</strong></li>
+                        <li>选择邮箱服务商（或自定义 POP3 服务器）</li>
+                        <li>点击<strong>「同步邮箱」</strong>按钮，系统会自动分析邮件、提取待办事项</li>
+                    </ul>
+                </div>
+                
+                <div class="settings-divider"></div>
+                
+                <!-- 功能介绍 -->
+                <div class="settings-section">
+                    <div class="settings-section-title">✨ 功能介绍</div>
+                    <ul style="margin: 10px 0; padding-left: 20px; line-height: 2;">
+                        <li><strong>智能提取待办</strong> — AI 分析邮件内容，识别需要您处理的事项</li>
+                        <li><strong>截止日期识别</strong> — 自动提取邮件中提到的截止时间</li>
+                        <li><strong>待办列表</strong> — 按截止日期排序，区分有/无截止时间</li>
+                        <li><strong>日历视图</strong> — 在日历上直观查看待办分布</li>
+                        <li><strong>智能转发</strong> — AI理解自然语言规则，自动转发匹配邮件给指定收件人</li>
+                        <li><strong>聊天助手</strong> — 用自然语言查询待办（如"今天有什么事"、"哪些快到期了"）</li>
+                        <li><strong>自动同步</strong> — 定时检查新邮件，自动提取待办</li>
+                    </ul>
+                </div>
+                
+                <div class="settings-divider"></div>
+                
+                <!-- 智能分析说明 -->
+                <div class="settings-section">
+                    <div class="settings-section-title">🤖 智能分析说明</div>
+                    <p style="margin: 10px 0; line-height: 1.8; color: #555;">
+                        系统会智能判断邮件中提到的事件是否需要您处理：
+                    </p>
+                    <ul style="margin: 10px 0; padding-left: 20px; line-height: 2; color: #555;">
+                        <li><strong>设置"您的称呼"可提高准确率</strong> — 如您的名字、职位、部门等</li>
+                    </ul>
+                </div>
+                
+                <div class="settings-divider"></div>
+                
+                <!-- 智能转发说明 -->
+                <div class="settings-section">
+                    <div class="settings-section-title">📤 智能转发说明</div>
+                    <p style="margin: 10px 0; line-height: 1.8; color: #555;">
+                        系统支持基于AI的智能邮件转发，自动将满足条件的邮件转发给指定收件人：
+                    </p>
+                    <ul style="margin: 10px 0; padding-left: 20px; line-height: 2; color: #555;">
+                        <li><strong>配置SMTP发送邮箱</strong> — 在设置的"SMTP 发送设置"中配置</li>
+                        <li><strong>创建转发规则</strong> — 在"转发规则"标签页用自然语言描述转发条件</li>
+                        <li><strong>AI自动判断</strong> — 同步邮件时，AI会根据规则自动判断是否转发</li>
+                        <li><strong>支持多规则多收件人</strong> — 一封邮件可匹配多条规则，每条规则可有多个收件人</li>
+                    </ul>
+                </div>
+                
+                <div class="settings-divider"></div>
+                
+                <!-- 小提示 -->
+                <div class="settings-section">
+                    <div class="settings-section-title">💡 小提示</div>
+                    <ul style="margin: 10px 0; padding-left: 20px; line-height: 2; color: #555;">
+                        <li>点击待办卡片可查看详情和原邮件内容</li>
+                        <li>删除的待办会进入回收站，可以恢复</li>
+                        <li>使用鼠标滚轮可以缩放界面</li>
+                    </ul>
+                </div>
+                
+            </div>
+            <div class="modal-actions" style="flex-shrink: 0; border-top: 1px solid #e0e0e0; padding: 15px 20px;">
+                <button class="btn-save" onclick="closeHelp()">我知道了</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加/编辑转发规则弹窗 -->
+    <div class="modal-overlay" id="ruleModal">
+        <div class="modal" style="max-width: 480px; max-height: 85vh; display: flex; flex-direction: column;">
+            <div class="modal-header" style="flex-shrink: 0;">
+                <h2 id="ruleModalTitle">📤 添加转发规则</h2>
+                <button class="modal-close" onclick="closeRuleModal()">&times;</button>
+            </div>
+            <div style="flex: 1; overflow-y: auto;">
+                <div class="form-group">
+                    <label for="ruleDescription">规则描述（自然语言）</label>
+                    <textarea id="ruleDescription" rows="3" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; resize: vertical;" placeholder="例如：转发与财务报销相关的邮件给张三"></textarea>
+                    <div class="hint">用自然语言描述转发条件，AI会理解并判断邮件是否匹配</div>
+                </div>
+                <div class="form-group">
+                    <label for="ruleRecipients">转发收件人</label>
+                    <textarea id="ruleRecipients" rows="2" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; resize: vertical;" placeholder="每行一个邮箱地址，例如：zhangsan@example.com"></textarea>
+                    <div class="hint">每行一个邮箱地址，支持多个收件人</div>
+                </div>
+                <div class="form-group">
+                    <label style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="ruleEnabled" checked style="width: 18px; height: 18px; margin-right: 8px;">
+                        <span>启用此规则</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="ruleAlsoCreateTodo" style="width: 18px; height: 18px; margin-right: 8px;">
+                        <span>命中后仍生成自处理待办</span>
+                    </label>
+                    <div class="hint">默认关闭：邮件已委派/知会出去，不再加入你的待办列表，仅出现在「已转发」中。<br>勾选后：除了转发，仍会让 AI 提取你需要跟进的事项加进待办（适用于"抄送知会、自己也要跟进"）。</div>
+                </div>
+            </div>
+            <div class="modal-actions" style="flex-shrink: 0; border-top: 1px solid #eee; padding-top: 15px; margin-top: 10px;">
+                <button class="btn-cancel" onclick="closeRuleModal()">取消</button>
+                <button class="btn-save" onclick="saveRuleModal()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 引入 JavaScript 模块 -->
+    <script src="js/config.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/email.js"></script>
+    <script src="js/todos.js"></script>
+    <script src="js/calendar.js"></script>
+    <script src="js/forward.js"></script>
+    <script src="js/forwarded.js"></script>
+    <script src="js/settings.js"></script>
+    <script src="js/chat.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

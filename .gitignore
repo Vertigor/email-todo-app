@@ -1,0 +1,55 @@
+# macOS
+__MACOSX/
+.DS_Store
+._*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# Build outputs
+build/
+dist/
+*.egg-info/
+*.egg
+*.whl
+
+# IDE
+.idea/
+.vscode/
+.vs/
+.qoder/
+.claude/
+*.swp
+*.swo
+
+# Runtime configs (sensitive - stored in AppData)
+deploy_starter/email_config.json
+deploy_starter/zoom_config.json
+deploy_starter/display_config.json
+deploy_starter/llm_config.json
+
+# Database
+*.db
+
+# Backup/archive files
+*.zip
+*.tar.gz
+*.rar
+
+# Logs
+*.log
+
+# PyInstaller
+*.spec.bak

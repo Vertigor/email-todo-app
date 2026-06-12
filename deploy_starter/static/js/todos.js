@@ -1,0 +1,336 @@
+/**
+ * 待办列表功能
+ */
+
+// 加载待办列表
+async function loadTodos() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/todos?completed=false`);
+        const data = await response.json();
+        
+        // 根据子标签过滤
+        let filteredTodos = data.todos;
+        if (currentSubTab === 'with-due') {
+            filteredTodos = data.todos.filter(todo => todo.due_date);
+        } else if (currentSubTab === 'no-due') {
+            filteredTodos = data.todos.filter(todo => !todo.due_date);
+            // 无截止时间的按发件时间排序
+            filteredTodos.sort((a, b) => {
+                const dateA = a.source_email_date ? new Date(a.source_email_date) : new Date(0);
+                const dateB = b.source_email_date ? new Date(b.source_email_date) : new Date(0);
+                return noDueSortAsc ? (dateA - dateB) : (dateB - dateA);
+            });
+        }
+        
+        renderTodos(filteredTodos, 'todos-list', false);
+    } catch (error) {
+        document.getElementById('todos-list').innerHTML = '<div class="empty-state">加载失败: ' + error.message + '</div>';
+    }
+}
+
+// 切换子标签
+function switchSubTab(subTab) {
+    currentSubTab = subTab;
+    // 更新子标签样式
+    document.querySelectorAll('.sub-tab').forEach(btn => {
+        btn.style.background = '#f8f9fa';
+        btn.style.color = '#333';
+    });
+    const activeBtn = document.getElementById('sub-tab-' + subTab);
+    if (activeBtn) {
+        activeBtn.style.background = '#007bff';
+        activeBtn.style.color = 'white';
+    }
+    // 显示/隐藏排序按钮
+    const sortBtn = document.getElementById('noDueSortBtn');
+    if (sortBtn) {
+        sortBtn.style.display = (subTab === 'no-due') ? 'inline-block' : 'none';
+    }
+    // 重新加载待办列表
+    loadTodos();
+}
+
+// 切换无截止时间排序方向
+function toggleNoDueSort() {
+    noDueSortAsc = !noDueSortAsc;
+    const sortBtn = document.getElementById('noDueSortBtn');
+    if (sortBtn) {
+        sortBtn.textContent = noDueSortAsc ? '📧 发件时间 ↑' : '📧 发件时间 ↓';
+        sortBtn.title = noDueSortAsc ? '当前：早的在前，点击切换' : '当前：晚的在前，点击切换';
+    }
+    loadTodos();
+}
+
+// 加载已完成列表
+async function loadCompletedTodos() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/todos?completed=true`);
+        const data = await response.json();
+        renderTodos(data.todos, 'completed-list', true);
+    } catch (error) {
+        document.getElementById('completed-list').innerHTML = '<div class="empty-state">加载失败: ' + error.message + '</div>';
+    }
+}
+
+// 加载回收站
+async function loadTrashTodos() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/todos/deleted`);
+        const data = await response.json();
+        renderTodos(data.todos, 'trash-list', false, true);
+    } catch (error) {
+        document.getElementById('trash-list').innerHTML = '<div class="empty-state">加载失败: ' + error.message + '</div>';
+    }
+}
+
+// 渲染待办列表
+function renderTodos(todos, containerId, isCompletedView, isTrashView = false) {
+    const container = document.getElementById(containerId);
+    
+    if (todos.length === 0) {
+        let emptyMsg = '暂无待办事项';
+        if (isCompletedView) emptyMsg = '暂无已完成事项';
+        if (isTrashView) emptyMsg = '回收站为空';
+        container.innerHTML = `<div class="empty-state">${emptyMsg}</div>`;
+        return;
+    }
+
+    container.innerHTML = todos.map(todo => {
+        const status = isTrashView ? 'status-deleted' : getTodoStatus(todo);
+        const statusLabel = isTrashView ? '🗑️ 已删除' : getStatusLabel(status);
+        
+        // 根据视图类型生成不同的按钮
+        let actionButton = '';
+        if (isTrashView) {
+            actionButton = `
+                <button class="complete-btn" style="background: #28a745; white-space: nowrap; flex-shrink: 0; min-width: 60px;" onclick="restoreTodo('${todo.id}')">恢复</button>
+            `;
+        } else {
+            actionButton = `
+                <button class="complete-btn" style="background: #dc3545; white-space: nowrap; flex-shrink: 0; min-width: 60px; margin-right: 8px;" onclick="deleteTodo('${todo.id}')">删除</button>
+                <button class="complete-btn" style="background: ${todo.completed ? '#6c757d' : '#28a745'}; white-space: nowrap; flex-shrink: 0; min-width: 60px;" onclick="toggleComplete('${todo.id}', ${!todo.completed})">
+                    ${todo.completed ? '取消' : '完成'}
+                </button>
+            `;
+        }
+        
+        return `
+        <div class="todo-item ${status}" onclick="openDetailModal('${todo.id}')" style="cursor: pointer;">
+            <div class="todo-title">
+                ${escapeHtml(todo.title)}
+                ${statusLabel ? `<span style="font-size: 12px; margin-left: 10px;">${statusLabel}</span>` : ''}
+            </div>
+            <div class="todo-description">${escapeHtml(todo.description)}</div>
+            <div class="todo-meta">
+                <div style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left;">
+                    <div style="text-align: left;">
+                        <span>截止: ${todo.due_date ? new Date(todo.due_date).toLocaleString('zh-CN') + ' ' + getRelativeDays(todo.due_date) : '无'}</span>
+                        <span style="margin-left: 15px;">发信人: ${escapeHtml(todo.source_email_from || '未知')}</span>
+                        ${todo.completed && todo.completed_at ? `<span style="margin-left: 15px;">完成于: ${new Date(todo.completed_at).toLocaleString('zh-CN')}</span>` : ''}
+                        ${isTrashView && todo.deleted_at ? `<span style="margin-left: 15px;">删除于: ${new Date(todo.deleted_at).toLocaleString('zh-CN')}</span>` : ''}
+                    </div>
+                    <div style="margin-top: 3px; text-align: left;" class="todo-source">邮件标题: ${escapeHtml(todo.source_email_subject)}</div>
+                </div>
+                <div onclick="event.stopPropagation();" style="margin-left: 15px; flex-shrink: 0;">
+                    ${actionButton}
+                </div>
+            </div>
+        </div>
+    `}).join('');
+}
+
+// 切换完成状态
+async function toggleComplete(todoId, completed) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/todos/${todoId}/complete`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({completed: completed})
+        });
+        if (response.ok) {
+            refreshCurrentView();
+        }
+    } catch (error) {
+        alert('操作失败: ' + error.message);
+    }
+}
+
+// 恢复待办
+async function restoreTodo(todoId) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/todos/${todoId}/restore`, {
+            method: 'PUT'
+        });
+        if (response.ok) {
+            loadTrashTodos();
+            // 同时刷新其他视图
+            loadTodos();
+            loadCompletedTodos();
+        }
+    } catch (error) {
+        alert('恢复失败: ' + error.message);
+    }
+}
+
+// 删除待办
+async function deleteTodo(todoId) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/todos/${todoId}/delete`, {
+            method: 'PUT'
+        });
+        if (response.ok) {
+            refreshCurrentView();
+        }
+    } catch (error) {
+        alert('删除失败: ' + error.message);
+    }
+}
+
+// ========== 详情弹窗功能 ==========
+
+// 打开详情弹窗
+async function openDetailModal(todoId) {
+    currentDetailTodoId = todoId;
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/todos/${todoId}`);
+        const data = await response.json();
+        currentDetailTodo = data.todo;
+        
+        // 填充表单
+        document.getElementById('detailTitle').value = currentDetailTodo.title || '';
+        document.getElementById('detailDescription').value = currentDetailTodo.description || '';
+        document.getElementById('detailCompleted').checked = currentDetailTodo.completed || false;
+        document.getElementById('detailCreatedAt').textContent = currentDetailTodo.created_at ? 
+            new Date(currentDetailTodo.created_at).toLocaleString('zh-CN') : '未知';
+        
+        // 填充原邮件信息
+        document.getElementById('detailSource').textContent = currentDetailTodo.source_email_subject || '无';
+        document.getElementById('detailFrom').textContent = currentDetailTodo.source_email_from || '未知';
+        document.getElementById('detailTo').textContent = currentDetailTodo.source_email_to || '未知';
+        // 抄送：有内容时显示，无内容时隐藏整行
+        const ccRow = document.getElementById('detailCcRow');
+        const ccValue = currentDetailTodo.source_email_cc;
+        if (ccValue && ccValue.trim()) {
+            document.getElementById('detailCc').textContent = ccValue;
+            ccRow.style.display = 'block';
+        } else {
+            ccRow.style.display = 'none';
+        }
+        document.getElementById('detailEmailDate').textContent = currentDetailTodo.source_email_date ? 
+            new Date(currentDetailTodo.source_email_date).toLocaleString('zh-CN') : '未知';
+        document.getElementById('detailEmailBody').textContent = currentDetailTodo.source_email_body || '(无正文)';
+        
+        // 处理截止日期
+        if (currentDetailTodo.due_date) {
+            const dueDate = new Date(currentDetailTodo.due_date);
+            // 转换为 datetime-local 格式
+            const localDateStr = dueDate.getFullYear() + '-' + 
+                String(dueDate.getMonth() + 1).padStart(2, '0') + '-' +
+                String(dueDate.getDate()).padStart(2, '0') + 'T' +
+                String(dueDate.getHours()).padStart(2, '0') + ':' +
+                String(dueDate.getMinutes()).padStart(2, '0');
+            document.getElementById('detailDueDate').value = localDateStr;
+        } else {
+            document.getElementById('detailDueDate').value = '';
+        }
+        
+        // 根据是否已删除显示不同的按钮
+        const deleteBtn = document.getElementById('detailDeleteBtn');
+        if (currentDetailTodo.deleted) {
+            deleteBtn.textContent = '恢复';
+            deleteBtn.style.background = '#28a745';
+        } else {
+            deleteBtn.textContent = '删除';
+            deleteBtn.style.background = '#dc3545';
+        }
+        
+        // 显示弹窗
+        document.querySelector('#detailModal .modal').style.transform = `scale(${currentZoom})`;
+        document.getElementById('detailModal').classList.add('active');
+    } catch (error) {
+        alert('加载详情失败: ' + error.message);
+    }
+}
+
+// 清除截止日期
+function clearDueDate() {
+    document.getElementById('detailDueDate').value = '';
+}
+
+// 关闭详情弹窗
+function closeDetailModal() {
+    document.getElementById('detailModal').classList.remove('active');
+    currentDetailTodoId = null;
+    currentDetailTodo = null;
+}
+
+// 保存待办详情
+async function saveTodoDetail() {
+    if (!currentDetailTodoId) return;
+    
+    const title = document.getElementById('detailTitle').value.trim();
+    const description = document.getElementById('detailDescription').value.trim();
+    const completed = document.getElementById('detailCompleted').checked;
+    const dueDateValue = document.getElementById('detailDueDate').value;
+    
+    if (!title) {
+        alert('标题不能为空');
+        return;
+    }
+    
+    try {
+        const body = {
+            title: title,
+            description: description,
+            completed: completed
+        };
+        
+        // 处理截止日期：有值则设置，空则清除
+        if (dueDateValue) {
+            body.due_date = new Date(dueDateValue).toISOString();
+        } else {
+            // 明确发送空字符串表示清除截止日期
+            body.due_date = "";
+        }
+        
+        const response = await fetch(`${API_BASE_URL}/api/todos/${currentDetailTodoId}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        });
+        
+        if (response.ok) {
+            closeDetailModal();
+            refreshCurrentView();
+        } else {
+            const data = await response.json();
+            alert('保存失败: ' + (data.detail || '未知错误'));
+        }
+    } catch (error) {
+        alert('保存失败: ' + error.message);
+    }
+}
+
+// 从详情弹窗删除待办
+async function deleteTodoFromDetail() {
+    if (!currentDetailTodoId || !currentDetailTodo) return;
+    
+    if (currentDetailTodo.deleted) {
+        // 恢复
+        await restoreTodo(currentDetailTodoId);
+    } else {
+        // 删除（可在回收站恢复，无需确认）
+        await deleteTodo(currentDetailTodoId);
+    }
+    closeDetailModal();
+}
+
+// 初始化详情弹窗事件
+function initDetailModalEvents() {
+    // 点击弹窗外部关闭（使用 mousedown 避免拖选文字时误关闭）
+    document.getElementById('detailModal').addEventListener('mousedown', function(e) {
+        if (e.target === this) {
+            closeDetailModal();
+        }
+    });
+}
