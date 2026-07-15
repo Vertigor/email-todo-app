@@ -2,6 +2,8 @@
 邮件转发服务
 通过SMTP发送/转发邮件
 """
+import base64
+import email as email_lib
 import json
 import os
 import smtplib
@@ -17,6 +19,44 @@ from deploy_starter.utils import (
     decrypt_password,
     log,
 )
+
+
+def _raw_email_dir() -> str:
+    """原始邮件（.eml）存放目录"""
+    d = os.path.join(get_config_dir(), "raw_emails")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _safe_email_filename(email_id: str) -> str:
+    """把 email_id 转成安全的文件名"""
+    return "".join(c if c.isalnum() or c in "-_." else "_" for c in email_id)[:200]
+
+
+def save_raw_email(email_id: str, raw_bytes: bytes) -> None:
+    """保存原始邮件字节到磁盘，供后续（手动）转发原样重建"""
+    if not email_id or not raw_bytes:
+        return
+    try:
+        path = os.path.join(_raw_email_dir(), _safe_email_filename(email_id) + ".eml")
+        with open(path, "wb") as f:
+            f.write(raw_bytes)
+    except Exception as e:
+        log(f"保存原始邮件失败 {email_id}: {e}", "转发")
+
+
+def load_raw_email(email_id: str) -> bytes:
+    """读回原始邮件字节，无则返回 None"""
+    if not email_id:
+        return None
+    try:
+        path = os.path.join(_raw_email_dir(), _safe_email_filename(email_id) + ".eml")
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                return f.read()
+    except Exception as e:
+        log(f"读取原始邮件失败 {email_id}: {e}", "转发")
+    return None
 
 
 def get_smtp_config() -> dict:
@@ -147,25 +187,64 @@ def save_smtp_config(
     return {"success": True, "message": "SMTP配置已保存"}
 
 
+def _build_forward_note(original_from, original_date, original_subject, rule_description) -> str:
+    """构建转发说明文本（放在转发邮件最前面）"""
+    note = f"""---------- 转发的邮件 ----------\r
+发件人: {original_from}\r
+日期: {original_date}\r
+主题: {original_subject}\r
+"""
+    if rule_description:
+        note += f"转发原因: 匹配规则「{rule_description}」\r\n"
+    note += "---------- 以下为原邮件内容 ----------"
+    return note
+
+
+def _attach_original_parts(msg: MIMEMultipart, original_raw: bytes) -> bool:
+    """
+    解析原始邮件并把其内容原样挂到转发邮件上，保留正文/HTML/内嵌图片/附件不变。
+
+    返回 True 表示成功挂载了原邮件内容，False 表示解析失败（调用方回退纯文本）。
+    """
+    try:
+        original = email_lib.message_from_bytes(original_raw)
+    except Exception as e:
+        log(f"解析原始邮件失败，回退纯文本转发: {e}", "转发")
+        return False
+
+    # 原样复制原邮件的各顶层部分：
+    # - multipart：逐个复制顶层子部件（如 multipart/related 整体保留，内嵌图片 cid 关系不变）
+    # - 单一部件：整体作为一个部分挂上
+    if original.is_multipart():
+        for part in original.get_payload():
+            msg.attach(part)
+    else:
+        msg.attach(original)
+    return True
+
+
 def forward_email(
     original_subject: str,
     original_from: str,
     original_date: str,
     original_body: str,
     recipients: list,
-    rule_description: str = ""
+    rule_description: str = "",
+    original_raw: bytes = None,
 ) -> dict:
     """
     转发邮件给指定收件人
-    
+
     Args:
         original_subject: 原邮件主题
         original_from: 原邮件发件人
         original_date: 原邮件日期
-        original_body: 原邮件正文
+        original_body: 原邮件正文（仅在无原始字节时作为纯文本回退）
         recipients: 转发收件人列表
         rule_description: 匹配的规则描述
-    
+        original_raw: 原始邮件字节。提供时原样保留正文/HTML/内嵌图片/附件；
+                      为空时回退到纯文本转发（兼容改动前生成的旧待办）
+
     Returns:
         结果字典
     """
@@ -178,40 +257,51 @@ def forward_email(
         return {"success": False, "error": "发件邮箱地址未配置"}
     if not smtp_config.get("password"):
         return {"success": False, "error": "SMTP密码未配置（请先同步收件邮箱并保存密码，或单独配置SMTP）"}
-    
+
     sender_email = smtp_config["email_address"]
     sender_name = smtp_config.get("sender_name", "邮箱待办助手")
     smtp_server = smtp_config["smtp_server"]
     smtp_port = smtp_config["smtp_port"]
     use_ssl = smtp_config.get("smtp_ssl", True)
     password = smtp_config["password"]
-    
-    # 构建转发邮件
-    msg = MIMEMultipart()
+
+    # 构建转发邮件外层
+    msg = MIMEMultipart('mixed')
     msg['From'] = formataddr((sender_name, sender_email))
     msg['To'] = ', '.join(recipients)
     msg['Date'] = formatdate(localtime=True)
     msg['Subject'] = Header(f"Fwd: {original_subject}", 'utf-8')
-    
-    # 构建转发正文
-    forward_body = f"""---------- 转发的邮件 ----------\r
-发件人: {original_from}\r
-日期: {original_date}\r
-主题: {original_subject}\r
-"""
-    if rule_description:
-        forward_body += f"转发原因: 匹配规则「{rule_description}」\r\n"
-    forward_body += f"\r\n{original_body}\r\n---------- 转发邮件结束 ----------"
-    
-    msg.attach(MIMEText(forward_body, 'plain', 'utf-8'))
-    
+
+    note = _build_forward_note(original_from, original_date, original_subject, rule_description)
+
+    # 有原始字节则原样重建（保留附件/HTML/内嵌图片），否则回退纯文本
+    rebuilt = False
+    if original_raw:
+        msg.attach(MIMEText(note + "\r\n", 'plain', 'utf-8'))
+        rebuilt = _attach_original_parts(msg, original_raw)
+
+    if not rebuilt:
+        # 回退：仅纯文本（清空可能已挂上的 note，避免重复）
+        msg = MIMEMultipart('mixed')
+        msg['From'] = formataddr((sender_name, sender_email))
+        msg['To'] = ', '.join(recipients)
+        msg['Date'] = formatdate(localtime=True)
+        msg['Subject'] = Header(f"Fwd: {original_subject}", 'utf-8')
+        forward_body = note + f"\r\n\r\n{original_body}\r\n---------- 转发邮件结束 ----------"
+        msg.attach(MIMEText(forward_body, 'plain', 'utf-8'))
+
     try:
         # 连接SMTP服务器并发送
         if use_ssl:
             server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=30)
         else:
             server = smtplib.SMTP(smtp_server, smtp_port, timeout=30)
-            server.starttls()
+            # 仅当服务器声明支持 STARTTLS 时才升级加密；
+            # 纯明文服务器（如内网测试）不支持该扩展，直接明文发送（与 Foxmail 行为一致）
+            server.ehlo()
+            if server.has_extn("STARTTLS"):
+                server.starttls()
+                server.ehlo()
         
         server.login(sender_email, password)
         server.sendmail(sender_email, recipients, msg.as_string())
@@ -257,7 +347,9 @@ async def process_forwarding_for_email(email_item: dict) -> dict:
     if not rules:
         return {"results": results, "skip_todo_creation": False}
 
-    single_email_json = json.dumps([email_item], ensure_ascii=False)
+    # 送给 LLM 规则匹配前剔除原始字节（raw_b64），避免撑爆 prompt
+    email_for_llm = {k: v for k, v in email_item.items() if k != "raw_b64"}
+    single_email_json = json.dumps([email_for_llm], ensure_ascii=False)
     try:
         match_result = await _check_forward_rules_impl(single_email_json)
     except Exception as e:
@@ -291,13 +383,25 @@ async def process_forwarding_for_email(email_item: dict) -> dict:
             log(f"邮件已转发过，跳过: {email_id} → 规则 {rule_id}", "转发")
             continue
 
+        # 取原始邮件字节：优先用同步时随 email_item 带来的 base64，其次从磁盘读回
+        original_raw = None
+        raw_b64 = email_item.get("raw_b64")
+        if raw_b64:
+            try:
+                original_raw = base64.b64decode(raw_b64)
+            except Exception:
+                original_raw = None
+        if original_raw is None:
+            original_raw = load_raw_email(email_id)
+
         forward_result = forward_email(
             original_subject=email_item.get("subject", "(无主题)"),
             original_from=email_item.get("from", "(未知)"),
             original_date=email_item.get("date", ""),
             original_body=email_item.get("body", ""),
             recipients=rule["recipients"],
-            rule_description=rule["description"]
+            rule_description=rule["description"],
+            original_raw=original_raw,
         )
 
         if forward_result.get("success"):

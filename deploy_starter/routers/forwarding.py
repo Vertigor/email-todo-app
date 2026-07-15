@@ -15,6 +15,7 @@ from deploy_starter.services.email_forward import (
     get_effective_smtp_config,
     save_smtp_config,
     forward_email,
+    load_raw_email,
 )
 
 router = APIRouter(prefix="/api", tags=["forwarding"])
@@ -195,13 +196,17 @@ async def manual_forward_email(request: ManualForwardRequest):
     if db.is_email_forwarded(email_id, request.rule_id):
         raise HTTPException(status_code=400, detail="该邮件已转发过")
     
+    # 取原始邮件字节，实现原样转发（含附件/HTML/内嵌图片）；旧待办无原文时回退纯文本
+    original_raw = load_raw_email(email_id)
+
     result = forward_email(
         original_subject=todo.source_email_subject or "(无主题)",
         original_from=todo.source_email_from or "(未知)",
         original_date=todo.source_email_date.isoformat() if todo.source_email_date else "",
         original_body=todo.source_email_body or "",
         recipients=rule["recipients"],
-        rule_description=rule["description"]
+        rule_description=rule["description"],
+        original_raw=original_raw,
     )
     
     if result.get("success"):
@@ -273,7 +278,11 @@ async def test_smtp_connection(request: SmtpConfigRequest):
             server = smtplib.SMTP_SSL(request.smtp_server, request.smtp_port, timeout=10)
         else:
             server = smtplib.SMTP(request.smtp_server, request.smtp_port, timeout=10)
-            server.starttls()
+            # 仅当服务器声明支持 STARTTLS 时才升级加密；纯明文服务器直接明文连接
+            server.ehlo()
+            if server.has_extn("STARTTLS"):
+                server.starttls()
+                server.ehlo()
         
         if request.password:
             server.login(request.email_address, request.password)

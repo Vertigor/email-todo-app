@@ -15,7 +15,8 @@ from deploy_starter.utils import (
     decrypt_password,
     log,
 )
-from deploy_starter.services.email_forward import process_forwarding_for_email
+import base64
+from deploy_starter.services.email_forward import process_forwarding_for_email, save_raw_email
 
 # 初始化数据库
 db = Database(get_db_path())
@@ -390,10 +391,13 @@ async def _sync_emails_impl(
             await asyncio.sleep(0)  # 让事件循环发送 SSE 数据
             
             try:
-                # 下载邮件正文（TOP 200）
-                raw_email = b'\n'.join(mail.top(mail_idx, 200)[1])
+                # 下载完整邮件（含附件），用于原样转发；RETR 取全文而非 TOP 截断
+                raw_email = b'\n'.join(mail.retr(mail_idx)[1])
                 email_message = email_lib.message_from_bytes(raw_email)
-                
+
+                # 原始字节落盘，供后续手动转发原样重建
+                save_raw_email(email_id, raw_email)
+
                 # 解析正文
                 body = ""
                 if email_message.is_multipart():
@@ -417,7 +421,7 @@ async def _sync_emails_impl(
                             body = _decode_payload(payload, charset)
                     except:
                         body = str(email_message.get_payload())
-                
+
                 emails.append({
                     "id": email_id,
                     "subject": subject,
@@ -425,7 +429,9 @@ async def _sync_emails_impl(
                     "date": email_date.isoformat(),
                     "from": from_header or "",
                     "to": to_header or "",
-                    "cc": cc_header or ""
+                    "cc": cc_header or "",
+                    # 随邮件带上原始字节（base64），供同步内联的自动转发直接原样重建
+                    "raw_b64": base64.b64encode(raw_email).decode("ascii"),
                 })
             except Exception as e:
                 log(f"下载邮件 {mail_idx} 出错: {e}", "POP3")
@@ -515,7 +521,9 @@ async def _sync_emails_impl(
         log(f"日期: {email_item.get('date', '(未知)')}", "LLM")
         log(f"正文:\n{body_preview}", "LLM")
 
-        single_email_json = json.dumps([email_item], ensure_ascii=False)
+        # 送给 LLM 前剔除原始字节（raw_b64），避免撑爆 prompt
+        email_for_llm = {k: v for k, v in email_item.items() if k != "raw_b64"}
+        single_email_json = json.dumps([email_for_llm], ensure_ascii=False)
         try:
             analysis_result = await _analyze_emails_to_todos_impl(single_email_json)
         except Exception as e:
