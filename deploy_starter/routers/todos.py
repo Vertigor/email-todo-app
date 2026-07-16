@@ -2,13 +2,15 @@
 Todo API 路由
 """
 from typing import Optional
+import uuid
 from datetime import datetime
 from calendar import monthrange
 
 from fastapi import APIRouter, HTTPException
 
 from deploy_starter.database import Database
-from deploy_starter.schemas import CompleteTodoRequest, UpdateTodoRequest
+from deploy_starter.models import TodoItem
+from deploy_starter.schemas import CompleteTodoRequest, UpdateTodoRequest, CreateTodoRequest
 from deploy_starter.utils import get_db_path
 
 router = APIRouter(prefix="/api/todos", tags=["todos"])
@@ -20,6 +22,34 @@ async def get_todos(completed: Optional[bool] = None):
     """获取待办列表（不包含已删除）"""
     todos = db.get_todos(completed, deleted=False)
     return {"todos": [todo.dict() for todo in todos]}
+
+
+@router.post("")
+async def create_todo(request: CreateTodoRequest):
+    """手动创建待办事项（无需来源邮件）"""
+    due_date = None
+    if request.due_date:
+        try:
+            due_date = datetime.fromisoformat(request.due_date.replace("Z", "+00:00"))
+            if due_date.tzinfo:
+                due_date = due_date.replace(tzinfo=None)
+        except Exception:
+            due_date = None
+
+    todo = TodoItem(
+        id=str(uuid.uuid4()),
+        title=request.title,
+        description=request.description or "",
+        due_date=due_date,
+        created_at=datetime.now(),
+        source_email_id="manual",
+        source_email_subject="手动创建",
+        is_manual=True,
+    )
+    if db.add_todo(todo):
+        return {"success": True, "todo": todo.dict()}
+    else:
+        raise HTTPException(status_code=500, detail="创建失败")
 
 
 @router.get("/deleted")

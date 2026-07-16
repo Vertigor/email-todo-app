@@ -129,7 +129,7 @@ function renderTodos(todos, containerId, isCompletedView, isTrashView = false) {
                         ${todo.completed && todo.completed_at ? `<span style="margin-left: 15px;">完成于: ${new Date(todo.completed_at).toLocaleString('zh-CN')}</span>` : ''}
                         ${isTrashView && todo.deleted_at ? `<span style="margin-left: 15px;">删除于: ${new Date(todo.deleted_at).toLocaleString('zh-CN')}</span>` : ''}
                     </div>
-                    <div style="margin-top: 3px; text-align: left;" class="todo-source">邮件标题: ${escapeHtml(todo.source_email_subject)}</div>
+                    <div style="margin-top: 3px; text-align: left;" class="todo-source">${todo.is_manual ? '来源: 手动录入' : '邮件标题: ' + escapeHtml(todo.source_email_subject)}</div>
                 </div>
                 <div onclick="event.stopPropagation();" style="margin-left: 15px; flex-shrink: 0;">
                     ${actionButton}
@@ -219,6 +219,11 @@ async function openDetailModal(todoId) {
         document.getElementById('detailEmailDate').textContent = currentDetailTodo.source_email_date ? 
             new Date(currentDetailTodo.source_email_date).toLocaleString('zh-CN') : '未知';
         document.getElementById('detailEmailBody').textContent = currentDetailTodo.source_email_body || '(无正文)';
+        // 手动创建的待办隐藏原邮件信息
+        const emailInfo = document.getElementById('detailEmailInfo');
+        if (emailInfo) {
+            emailInfo.style.display = currentDetailTodo.is_manual ? 'none' : 'block';
+        }
         
         // 处理截止日期
         if (currentDetailTodo.due_date) {
@@ -323,6 +328,69 @@ async function deleteTodoFromDetail() {
         await deleteTodo(currentDetailTodoId);
     }
     closeDetailModal();
+}
+
+// ========== 手动新增待办弹窗 ==========
+
+// 打开新增待办弹窗
+function showAddManualModal() {
+    document.getElementById('manualTitle').value = '';
+    document.getElementById('manualDescription').value = '';
+    document.getElementById('manualDueDate').value = '';
+    document.querySelector('#addManualModal .modal').style.transform = `scale(${currentZoom})`;
+    document.getElementById('addManualModal').classList.add('active');
+    document.getElementById('manualTitle').focus();
+}
+
+// 关闭新增待办弹窗
+function closeAddManualModal() {
+    document.getElementById('addManualModal').classList.remove('active');
+}
+
+// 保存手动新增的待办
+async function saveManualTodo() {
+    const title = document.getElementById('manualTitle').value.trim();
+    const description = document.getElementById('manualDescription').value.trim();
+    const dueDateValue = document.getElementById('manualDueDate').value;
+
+    if (!title) {
+        alert('标题不能为空');
+        return;
+    }
+
+    const body = {
+        title: title,
+        description: description || null
+    };
+    if (dueDateValue) {
+        body.due_date = new Date(dueDateValue).toISOString();
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/todos`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        });
+        if (response.ok) {
+            closeAddManualModal();
+            refreshCurrentView();
+        } else {
+            const data = await response.json();
+            alert('创建失败: ' + (data.detail || '未知错误'));
+        }
+    } catch (error) {
+        alert('创建失败: ' + error.message);
+    }
+}
+
+// 初始化新增待办弹窗事件
+function initAddManualModalEvents() {
+    document.getElementById('addManualModal').addEventListener('mousedown', function(e) {
+        if (e.target === this) {
+            closeAddManualModal();
+        }
+    });
 }
 
 // 初始化详情弹窗事件

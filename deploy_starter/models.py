@@ -24,6 +24,7 @@ class TodoItem(BaseModel):
     completed_at: Optional[datetime] = None  # 完成时间（可选）
     deleted: bool = False  # 是否已删除（软删除）
     deleted_at: Optional[datetime] = None  # 删除时间（可选）
+    is_manual: bool = False  # 是否手动录入（非邮件来源）
 
     class Config:
         json_encoders = {

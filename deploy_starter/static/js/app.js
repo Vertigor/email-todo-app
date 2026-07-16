@@ -52,6 +52,7 @@ window.onload = async function() {
     // 初始化事件监听
     initEmailProviderListener();
     initDetailModalEvents();
+    initAddManualModalEvents();
     initSettingsModalEvents();
     initHelpModalEvents();
     initRuleModalEvents();

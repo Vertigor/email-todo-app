@@ -166,8 +166,13 @@ def log(message: str, prefix: str = ""):
     else:
         log_line = f"[{timestamp}] {message}"
     
-    # 输出到终端
-    print(log_line)
+    # 输出到终端（避免 Windows 控制台 GBK 编码导致的乱码）
+    try:
+        safe_line = log_line.encode(sys.stdout.encoding or 'gbk', errors='replace').decode(
+            sys.stdout.encoding or 'gbk')
+        print(safe_line)
+    except Exception:
+        print(log_line)
     
     # 写入日志文件（按天命名）
     try:

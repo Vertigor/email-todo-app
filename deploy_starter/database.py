@@ -77,6 +77,11 @@ class Database:
             cursor.execute("ALTER TABLE todos ADD COLUMN source_email_cc TEXT")
         except sqlite3.OperationalError:
             pass  # 字段已存在
+        # 添加 is_manual 字段（是否手动录入，非邮件来源）
+        try:
+            cursor.execute("ALTER TABLE todos ADD COLUMN is_manual INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass  # 字段已存在
 
         # 已处理邮件表（避免重复处理）
         cursor.execute("""
@@ -152,8 +157,9 @@ class Database:
                 INSERT OR REPLACE INTO todos 
                 (id, title, description, due_date, created_at, source_email_id, 
                  source_email_subject, completed, completed_at, deleted, deleted_at, 
-                 source_email_from, source_email_to, source_email_cc, source_email_date, source_email_body)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 source_email_from, source_email_to, source_email_cc, source_email_date, source_email_body,
+                 is_manual)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 todo.id,
                 todo.title,
@@ -171,6 +177,7 @@ class Database:
                 todo.source_email_cc,
                 todo.source_email_date.isoformat() if todo.source_email_date else None,
                 todo.source_email_body,
+                1 if todo.is_manual else 0,
             ))
             conn.commit()
             return True
@@ -251,6 +258,7 @@ class Database:
             source_email_cc=safe_get('source_email_cc'),
             source_email_date=datetime.fromisoformat(source_email_date_str) if source_email_date_str else None,
             source_email_body=safe_get('source_email_body'),
+            is_manual=bool(safe_get('is_manual')),
             completed=bool(row['completed']),
             completed_at=datetime.fromisoformat(row['completed_at']) if row['completed_at'] else None,
             deleted=bool(row['deleted']) if row['deleted'] is not None else False,

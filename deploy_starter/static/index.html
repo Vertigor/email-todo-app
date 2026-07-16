@@ -69,6 +69,7 @@
                 <button class="sub-tab active" onclick="switchSubTab('with-due')" id="sub-tab-with-due" style="padding: 8px 16px; border: 1px solid #ddd; border-radius: 4px; background: #007bff; color: white; cursor: pointer;">有截止时间</button>
                 <button class="sub-tab" onclick="switchSubTab('no-due')" id="sub-tab-no-due" style="padding: 8px 16px; border: 1px solid #ddd; border-radius: 4px; background: #f8f9fa; color: #333; cursor: pointer;">无截止时间</button>
                 <button id="noDueSortBtn" onclick="toggleNoDueSort()" style="display: none; padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; background: #f8f9fa; color: #666; cursor: pointer; font-size: 13px;" title="切换排序方向">📧 发件时间 ↑</button>
+                <button id="addManualBtn" onclick="showAddManualModal()" style="margin-left: auto; padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">✍️ 新增待办</button>
             </div>
             <div id="todos-list" class="loading">加载中...</div>
         </div>
@@ -188,7 +189,7 @@
             <div class="form-group" style="font-size: 12px; color: #888;">
                 <div>任务创建时间: <span id="detailCreatedAt"></span></div>
             </div>
-            <div class="form-group" style="font-size: 12px; color: #666;">
+            <div class="form-group" id="detailEmailInfo" style="font-size: 12px; color: #666;">
                 <div style="margin-bottom: 8px;"><strong>📧 原邮件信息</strong></div>
                 <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px; padding: 10px; max-height: 250px; overflow-y: auto;">
                     <div style="margin-bottom: 5px;"><strong>标题:</strong> <span id="detailSource"></span></div>
@@ -209,6 +210,38 @@
                     <button class="btn-cancel" onclick="closeDetailModal()" style="margin-right: 10px;">取消</button>
                     <button class="btn-save" onclick="saveTodoDetail()">保存</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新增待办弹窗 -->
+    <div class="modal-overlay" id="addManualModal">
+        <div class="modal" style="max-width: 500px; max-height: 85vh; display: flex; flex-direction: column;">
+            <div class="modal-header" style="flex-shrink: 0;">
+                <h2>✍️ 新增待办</h2>
+                <button class="modal-close" onclick="closeAddManualModal()">&times;</button>
+            </div>
+            <div style="flex: 1; overflow-y: auto; padding-right: 5px;">
+                <div class="form-group">
+                    <label for="manualTitle">标题 <span style="color:#dc3545;">*</span></label>
+                    <input type="text" id="manualTitle" placeholder="待办标题（必填）">
+                </div>
+                <div class="form-group">
+                    <label for="manualDescription">详情</label>
+                    <textarea id="manualDescription" rows="4" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; resize: vertical;"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="manualDueDate">截止日期</label>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <input type="datetime-local" id="manualDueDate" style="padding: 10px; border: 1px solid #ddd; border-radius: 6px; flex: 1;">
+                        <button type="button" onclick="document.getElementById('manualDueDate').value=''" style="padding: 10px 15px; background: #6c757d; color: white; border: none; border-radius: 6px; cursor: pointer; white-space: nowrap;">清除</button>
+                    </div>
+                    <div class="hint" style="margin-top: 5px; font-size: 12px; color: #888;">留空表示无截止日期</div>
+                </div>
+            </div>
+            <div class="modal-actions" style="justify-content: flex-end; flex-shrink: 0; border-top: 1px solid #eee; padding-top: 15px; margin-top: 10px;">
+                <button class="btn-cancel" onclick="closeAddManualModal()" style="margin-right: 10px;">取消</button>
+                <button class="btn-save" onclick="saveManualTodo()">创建</button>
             </div>
         </div>
     </div>

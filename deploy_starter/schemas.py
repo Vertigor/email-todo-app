@@ -72,6 +72,13 @@ class UpdateTodoRequest(BaseModel):
     due_date: str | None = None  # ISO format datetime string
 
 
+class CreateTodoRequest(BaseModel):
+    """手动创建待办请求"""
+    title: str  # 标题（必填）
+    description: str | None = None  # 描述（可选）
+    due_date: str | None = None  # 截止日期，ISO 格式 datetime 字符串（可选）
+
+
 # ==================== Settings 相关模型 ====================
 
 class ZoomRequest(BaseModel):
