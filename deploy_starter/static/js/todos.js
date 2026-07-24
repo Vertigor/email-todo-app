@@ -393,6 +393,227 @@ function initAddManualModalEvents() {
     });
 }
 
+// ========== 导出待办弹窗 ==========
+
+// 计算 YYYY-MM-DD 字符串（本地时区）
+function _toDateStr(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+// 打开导出弹窗（默认最近 7 天）
+function showExportModal() {
+    const today = new Date();
+    const endStr = _toDateStr(today);
+    const start = new Date(today);
+    start.setDate(today.getDate() - 6);
+    const startStr = _toDateStr(start);
+    document.getElementById('exportStartDate').value = startStr;
+    document.getElementById('exportEndDate').value = endStr;
+    document.getElementById('exportFormat').value = 'csv';
+    document.getElementById('exportOnlyPending').checked = false;
+    document.querySelector('#exportModal .modal').style.transform = `scale(${currentZoom})`;
+    document.getElementById('exportModal').classList.add('active');
+    refreshExportCount();
+}
+
+// 关闭导出弹窗
+function closeExportModal() {
+    document.getElementById('exportModal').classList.remove('active');
+}
+
+// 刷新「本时间段共 N 条」预览
+async function refreshExportCount() {
+    const tip = document.getElementById('exportCountTip');
+    const start = document.getElementById('exportStartDate').value;
+    const end = document.getElementById('exportEndDate').value;
+    if (!start || !end) {
+        tip.textContent = '请选择开始和结束日期';
+        return;
+    }
+    if (start > end) {
+        tip.textContent = '⚠️ 开始日期不能晚于结束日期';
+        return;
+    }
+    const onlyPending = document.getElementById('exportOnlyPending').checked;
+    const params = new URLSearchParams({
+        start_date: start,
+        end_date: end,
+        count_only: 'true'
+    });
+    if (onlyPending) params.set('completed', 'false');
+    try {
+        const resp = await fetch(`${API_BASE_URL}/api/todos/export?${params.toString()}`);
+        if (!resp.ok) {
+            tip.textContent = '查询数量失败';
+            return;
+        }
+        const data = await resp.json();
+        tip.textContent = `本时间段共 ${data.count} 条待办`;
+    } catch (e) {
+        tip.textContent = '查询数量失败: ' + e.message;
+    }
+}
+
+// 执行导出（触发浏览器下载）
+async function exportTodos() {
+    const start = document.getElementById('exportStartDate').value;
+    const end = document.getElementById('exportEndDate').value;
+    const fmt = document.getElementById('exportFormat').value;
+    const onlyPending = document.getElementById('exportOnlyPending').checked;
+
+    if (!start || !end) {
+        alert('请选择开始和结束日期');
+        return;
+    }
+    if (start > end) {
+        alert('开始日期不能晚于结束日期');
+        return;
+    }
+
+    const params = new URLSearchParams({
+        start_date: start,
+        end_date: end,
+        format: fmt
+    });
+    if (onlyPending) params.set('completed', 'false');
+
+    const url = `${API_BASE_URL}/api/todos/export?${params.toString()}`;
+    try {
+        const resp = await fetch(url);
+        if (!resp.ok) {
+            let msg = '导出失败';
+            try { msg = '导出失败: ' + (await resp.text()); } catch (e) {}
+            alert(msg);
+            return;
+        }
+        const blob = await resp.blob();
+        // 从 Content-Disposition 取文件名，兼容带引号 / 不带引号
+        const cd = resp.headers.get('Content-Disposition') || '';
+        let filename = `todos_${start}_${end}.${fmt}`;
+        const fm = cd.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)/i);
+        if (fm) filename = fm[1].replace(/^["']|["']$/g, '');
+
+        const a = document.createElement('a');
+        const objectUrl = URL.createObjectURL(blob);
+        a.href = objectUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(objectUrl);
+
+        closeExportModal();
+    } catch (e) {
+        alert('导出失败: ' + e.message);
+    }
+}
+
+// 初始化导出弹窗事件
+function initExportModalEvents() {
+    document.getElementById('exportModal').addEventListener('mousedown', function(e) {
+        if (e.target === this) {
+            closeExportModal();
+        }
+    });
+}
+
+// 打开报告弹窗（默认周报，自动算日期范围）
+function showReportModal(period) {
+    const p = period || 'weekly';
+    const radios = document.querySelectorAll('input[name="reportPeriod"]');
+    radios.forEach(r => { r.checked = (r.value === p); });
+    _applyReportPeriod(p);
+    document.querySelector('#reportModal .modal').style.transform = `scale(${currentZoom})`;
+    document.getElementById('reportModal').classList.add('active');
+}
+
+// 关闭报告弹窗
+function closeReportModal() {
+    document.getElementById('reportModal').classList.remove('active');
+}
+
+// 根据周期类型计算默认日期范围（本周一~今天 / 今天 / 本月1号~今天）
+function _applyReportPeriod(period) {
+    const today = new Date();
+    const endStr = _toDateStr(today);
+    let start;
+    if (period === 'daily') {
+        start = today;
+    } else if (period === 'monthly') {
+        start = new Date(today.getFullYear(), today.getMonth(), 1);
+    } else { // weekly：本周一 ~ 今天
+        start = new Date(today);
+        const dow = (today.getDay() + 6) % 7; // 周一=0
+        start.setDate(today.getDate() - dow);
+    }
+    document.getElementById('reportStartDate').value = _toDateStr(start);
+    document.getElementById('reportEndDate').value = endStr;
+}
+
+// 生成并下载 Word 报告
+async function generateReport() {
+    const start = document.getElementById('reportStartDate').value;
+    const end = document.getElementById('reportEndDate').value;
+    const periodEl = document.querySelector('input[name="reportPeriod"]:checked');
+    const period = periodEl ? periodEl.value : 'weekly';
+
+    if (!start || !end) {
+        alert('请选择开始和结束日期');
+        return;
+    }
+    if (start > end) {
+        alert('开始日期不能晚于结束日期');
+        return;
+    }
+
+    const params = new URLSearchParams({ start_date: start, end_date: end, period });
+    const url = `${API_BASE_URL}/api/todos/report?${params.toString()}`;
+    try {
+        const resp = await fetch(url);
+        if (!resp.ok) {
+            let msg = '生成失败';
+            try { msg = '生成失败: ' + (await resp.text()); } catch (e) {}
+            alert(msg);
+            return;
+        }
+        const blob = await resp.blob();
+        const cd = resp.headers.get('Content-Disposition') || '';
+        let filename = `工作报告_${start}_${end}.docx`;
+        const fmStar = cd.match(/filename\*=UTF-8''([^;]+)/i);
+        const fmPlain = cd.match(/filename="?([^";]+)"?/i);
+        if (fmStar) {
+            try { filename = decodeURIComponent(fmStar[1]); } catch (e) { filename = fmStar[1]; }
+        } else if (fmPlain) {
+            filename = fmPlain[1];
+        }
+
+        const a = document.createElement('a');
+        const objectUrl = URL.createObjectURL(blob);
+        a.href = objectUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(objectUrl);
+
+        closeReportModal();
+    } catch (e) {
+        alert('生成失败: ' + e.message);
+    }
+}
+
+// 初始化报告弹窗事件
+function initReportModalEvents() {
+    document.getElementById('reportModal').addEventListener('mousedown', function(e) {
+        if (e.target === this) {
+            closeReportModal();
+        }
+    });
+}
+
 // 初始化详情弹窗事件
 function initDetailModalEvents() {
     // 点击弹窗外部关闭（使用 mousedown 避免拖选文字时误关闭）

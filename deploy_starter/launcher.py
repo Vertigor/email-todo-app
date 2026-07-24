@@ -60,6 +60,17 @@ def run_server():
 
 def main():
     """主函数"""
+    # 无界面模式（服务器模式）：用于无显示环境 / 自动化测试
+    if os.environ.get("ET_NO_GUI") == "1":
+        print("[launcher] ET_NO_GUI=1 -> 仅启动后台服务，不加载 GUI")
+        run_server()
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
+        return
+
     # 启动后台服务器
     server_thread = threading.Thread(target=run_server, daemon=True)
     server_thread.start()

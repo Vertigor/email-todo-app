@@ -53,6 +53,8 @@ window.onload = async function() {
     initEmailProviderListener();
     initDetailModalEvents();
     initAddManualModalEvents();
+    initExportModalEvents();
+    initReportModalEvents();
     initSettingsModalEvents();
     initHelpModalEvents();
     initRuleModalEvents();

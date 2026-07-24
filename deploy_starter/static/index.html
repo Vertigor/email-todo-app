@@ -69,6 +69,8 @@
                 <button class="sub-tab active" onclick="switchSubTab('with-due')" id="sub-tab-with-due" style="padding: 8px 16px; border: 1px solid #ddd; border-radius: 4px; background: #007bff; color: white; cursor: pointer;">有截止时间</button>
                 <button class="sub-tab" onclick="switchSubTab('no-due')" id="sub-tab-no-due" style="padding: 8px 16px; border: 1px solid #ddd; border-radius: 4px; background: #f8f9fa; color: #333; cursor: pointer;">无截止时间</button>
                 <button id="noDueSortBtn" onclick="toggleNoDueSort()" style="display: none; padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; background: #f8f9fa; color: #666; cursor: pointer; font-size: 13px;" title="切换排序方向">📧 发件时间 ↑</button>
+                <button id="exportBtn" onclick="showExportModal()" style="padding: 8px 16px; background: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">📤 导出待办</button>
+                <button id="reportBtn" onclick="showReportModal()" style="padding: 8px 16px; background: #6f42c1; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">📝 生成报告</button>
                 <button id="addManualBtn" onclick="showAddManualModal()" style="margin-left: auto; padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">✍️ 新增待办</button>
             </div>
             <div id="todos-list" class="loading">加载中...</div>
@@ -242,6 +244,90 @@
             <div class="modal-actions" style="justify-content: flex-end; flex-shrink: 0; border-top: 1px solid #eee; padding-top: 15px; margin-top: 10px;">
                 <button class="btn-cancel" onclick="closeAddManualModal()" style="margin-right: 10px;">取消</button>
                 <button class="btn-save" onclick="saveManualTodo()">创建</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导出待办弹窗 -->
+    <div class="modal-overlay" id="exportModal">
+        <div class="modal" style="max-width: 480px; max-height: 85vh; display: flex; flex-direction: column;">
+            <div class="modal-header" style="flex-shrink: 0;">
+                <h2>📤 导出待办</h2>
+                <button class="modal-close" onclick="closeExportModal()">&times;</button>
+            </div>
+            <div style="flex: 1; overflow-y: auto; padding-right: 5px;">
+                <p style="font-size: 13px; color: #666; margin: 0 0 15px 0; line-height: 1.6;">
+                    选择日期范围，导出该时间段内创建的待办，方便编制日报 / 周报。默认范围为最近 7 天。
+                </p>
+                <div class="form-group">
+                    <label for="exportStartDate">开始日期</label>
+                    <input type="date" id="exportStartDate" style="padding: 10px; border: 1px solid #ddd; border-radius: 6px; width: 100%; box-sizing: border-box;" onchange="refreshExportCount()">
+                </div>
+                <div class="form-group">
+                    <label for="exportEndDate">结束日期</label>
+                    <input type="date" id="exportEndDate" style="padding: 10px; border: 1px solid #ddd; border-radius: 6px; width: 100%; box-sizing: border-box;" onchange="refreshExportCount()">
+                </div>
+                <div style="display: flex; gap: 15px; align-items: flex-end;">
+                    <div class="form-group" style="margin: 0; flex: 1;">
+                        <label for="exportFormat">导出格式</label>
+                        <select id="exportFormat" style="padding: 10px; border: 1px solid #ddd; border-radius: 6px; width: 100%; box-sizing: border-box; background: white;">
+                            <option value="csv">CSV（Excel 可直接打开）</option>
+                            <option value="json">JSON（结构化数据）</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin: 0 0 10px 0; display: flex; align-items: center; white-space: nowrap;">
+                        <label style="display: flex; align-items: center; cursor: pointer; font-size: 13px;">
+                            <input type="checkbox" id="exportOnlyPending" style="width: 16px; height: 16px; margin-right: 6px;" onchange="refreshExportCount()">
+                            <span>仅未完成的</span>
+                        </label>
+                    </div>
+                </div>
+                <div id="exportCountTip" style="font-size: 13px; color: #17a2b8; min-height: 20px; margin: 4px 0 0 0;">—</div>
+            </div>
+            <div class="modal-actions" style="justify-content: flex-end; flex-shrink: 0; border-top: 1px solid #eee; padding-top: 15px; margin-top: 10px;">
+                <button class="btn-cancel" onclick="closeExportModal()" style="margin-right: 10px;">取消</button>
+                <button class="btn-save" onclick="exportTodos()">导出</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 生成报告弹窗 -->
+    <div class="modal-overlay" id="reportModal">
+        <div class="modal" style="max-width: 480px; max-height: 85vh; display: flex; flex-direction: column;">
+            <div class="modal-header" style="flex-shrink: 0;">
+                <h2>📝 生成工作报告</h2>
+                <button class="modal-close" onclick="closeReportModal()">&times;</button>
+            </div>
+            <div style="flex: 1; overflow-y: auto; padding-right: 5px;">
+                <p style="font-size: 13px; color: #666; margin: 0 0 15px 0; line-height: 1.6;">
+                    选择报告周期与日期范围，自动归纳该时段的待办，生成 Word 工作报告（.docx），方便编制日报 / 周报 / 月报。
+                </p>
+                <div class="form-group">
+                    <label>报告周期</label>
+                    <div style="display: flex; gap: 12px; margin-top: 4px;">
+                        <label style="display: flex; align-items: center; cursor: pointer; font-size: 14px;">
+                            <input type="radio" name="reportPeriod" value="daily" style="margin-right: 6px;" onchange="_applyReportPeriod('daily')"> 日报
+                        </label>
+                        <label style="display: flex; align-items: center; cursor: pointer; font-size: 14px;">
+                            <input type="radio" name="reportPeriod" value="weekly" style="margin-right: 6px;" onchange="_applyReportPeriod('weekly')" checked> 周报
+                        </label>
+                        <label style="display: flex; align-items: center; cursor: pointer; font-size: 14px;">
+                            <input type="radio" name="reportPeriod" value="monthly" style="margin-right: 6px;" onchange="_applyReportPeriod('monthly')"> 月报
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="reportStartDate">开始日期</label>
+                    <input type="date" id="reportStartDate" style="padding: 10px; border: 1px solid #ddd; border-radius: 6px; width: 100%; box-sizing: border-box;">
+                </div>
+                <div class="form-group">
+                    <label for="reportEndDate">结束日期</label>
+                    <input type="date" id="reportEndDate" style="padding: 10px; border: 1px solid #ddd; border-radius: 6px; width: 100%; box-sizing: border-box;">
+                </div>
+            </div>
+            <div class="modal-actions" style="justify-content: flex-end; flex-shrink: 0; border-top: 1px solid #eee; padding-top: 15px; margin-top: 10px;">
+                <button class="btn-cancel" onclick="closeReportModal()" style="margin-right: 10px;">取消</button>
+                <button class="btn-save" onclick="generateReport()">生成并下载</button>
             </div>
         </div>
     </div>
@@ -427,6 +513,7 @@
                         <li><strong>智能转发</strong> — AI理解自然语言规则，自动转发匹配邮件给指定收件人</li>
                         <li><strong>聊天助手</strong> — 用自然语言查询待办（如"今天有什么事"、"哪些快到期了"）</li>
                         <li><strong>自动同步</strong> — 定时检查新邮件，自动提取待办</li>
+                        <li><strong>待办导出</strong> — 按日期范围导出 CSV/JSON，方便编制日报、周报</li>
                     </ul>
                 </div>
                 

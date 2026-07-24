@@ -302,6 +302,53 @@ class Database:
 
         return [self._row_to_todo(row) for row in rows]
 
+    def get_todos_by_created_range(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        completed: Optional[bool] = None,
+        deleted: bool = False
+    ) -> List[TodoItem]:
+        """
+        按「创建时间」的日期部分筛选待办（用于导出 / 日报周报编制），排除已删除。
+
+        Args:
+            start_date: 开始日期（含当天 00:00:00）
+            end_date: 结束日期（含当天 23:59:59）
+            completed: 完成状态筛选，None 表示全部
+            deleted: 是否包含已删除的（默认 False）
+
+        Returns:
+            待办事项列表（按创建时间倒序）
+        """
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        start_str = start_date.strftime("%Y-%m-%d")
+        end_str = end_date.strftime("%Y-%m-%d")
+
+        filters = []
+        params = []
+        if deleted:
+            filters.append("deleted = 1")
+        else:
+            filters.append("(deleted = 0 OR deleted IS NULL)")
+        # created_at 形如 2026-07-16T17:55:50.xxxxxx，前 10 位即日期
+        filters.append("substr(created_at, 1, 10) >= ?")
+        filters.append("substr(created_at, 1, 10) <= ?")
+        params.extend([start_str, end_str])
+        if completed is not None:
+            filters.append("completed = ?")
+            params.append(1 if completed else 0)
+
+        sql = f"SELECT * FROM todos WHERE {' AND '.join(filters)} ORDER BY created_at DESC"
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [self._row_to_todo(row) for row in rows]
+
     def mark_email_processed(self, email_id: str):
         """
         标记邮件已处理
