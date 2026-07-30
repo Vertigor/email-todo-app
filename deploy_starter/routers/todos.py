@@ -112,68 +112,78 @@ async def export_todos(
     if sd > ed:
         raise HTTPException(status_code=400, detail="开始日期不能晚于结束日期")
 
-    todos = db.get_todos_by_created_range(sd, ed, completed=completed)
+    try:
+        todos = db.get_todos_by_created_range(sd, ed, completed=completed)
 
-    if count_only:
-        return {"count": len(todos), "start_date": start_date, "end_date": end_date}
+        if count_only:
+            return {"count": len(todos), "start_date": start_date, "end_date": end_date}
 
-    # 统一把待办转成可导出字段（中文状态 / 格式化时间）
-    def _fmt(dt):
-        return dt.strftime("%Y-%m-%d %H:%M:%S") if dt else ""
+        # 统一把待办转成可导出字段（中文状态 / 格式化时间）
+        def _fmt(dt):
+            return dt.strftime("%Y-%m-%d %H:%M:%S") if dt else ""
 
-    def _to_row(todo):
-        return {
-            "title": todo.title,
-            "status": "已完成" if todo.completed else "待办中",
-            "description": todo.description or "",
-            "source": "手动录入" if todo.is_manual else "邮件",
-            "source_email_subject": todo.source_email_subject or "",
-            "source_email_from": todo.source_email_from or "",
-            "source_email_to": todo.source_email_to or "",
-            "source_email_cc": todo.source_email_cc or "",
-            "source_email_date": _fmt(todo.source_email_date),
-            "due_date": _fmt(todo.due_date),
-            "created_at": _fmt(todo.created_at),
-            "completed_at": _fmt(todo.completed_at),
-        }
+        def _to_row(todo):
+            return {
+                "title": todo.title or "",
+                "status": "已完成" if todo.completed else "待办中",
+                "description": todo.description or "",
+                "source": "手动录入" if todo.is_manual else "邮件",
+                "source_email_subject": todo.source_email_subject or "",
+                "source_email_from": todo.source_email_from or "",
+                "source_email_to": todo.source_email_to or "",
+                "source_email_cc": todo.source_email_cc or "",
+                "source_email_date": _fmt(todo.source_email_date),
+                "due_date": _fmt(todo.due_date),
+                "created_at": _fmt(todo.created_at),
+                "completed_at": _fmt(todo.completed_at),
+            }
 
-    rows = [_to_row(t) for t in todos]
-    # 中文表头（给用户看）；keys 与 headers 一一对应，用于按列取英文键字典的值
-    headers = [
-        "标题", "状态", "详情", "来源", "邮件主题", "发信人",
-        "收件人", "抄送", "邮件时间", "截止时间", "创建时间", "完成时间",
-    ]
-    keys = [
-        "title", "status", "description", "source", "source_email_subject",
-        "source_email_from", "source_email_to", "source_email_cc",
-        "source_email_date", "due_date", "created_at", "completed_at",
-    ]
+        rows = [_to_row(t) for t in todos]
+        # 中文表头（给用户看）；keys 与 headers 一一对应，用于按列取英文键字典的值
+        headers = [
+            "标题", "状态", "详情", "来源", "邮件主题", "发信人",
+            "收件人", "抄送", "邮件时间", "截止时间", "创建时间", "完成时间",
+        ]
+        keys = [
+            "title", "status", "description", "source", "source_email_subject",
+            "source_email_from", "source_email_to", "source_email_cc",
+            "source_email_date", "due_date", "created_at", "completed_at",
+        ]
 
-    if format == "json":
-        content = json.dumps(rows, ensure_ascii=False, indent=2)
+        if format == "json":
+            content = json.dumps(rows, ensure_ascii=False, indent=2)
+            return Response(
+                content=content.encode("utf-8"),
+                media_type="application/json; charset=utf-8",
+                headers={
+                    "Content-Disposition": f"attachment; filename=todos_{start_date}_{end_date}.json"
+                },
+            )
+
+        # 默认 CSV：用 utf-8-sig 自动加 BOM，Excel 打开中文不乱码
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(headers)
+        for r in rows:
+            writer.writerow([r[k] for k in keys])
+        csv_bytes = buf.getvalue().encode("utf-8-sig")
+
         return Response(
-            content=content.encode("utf-8"),
-            media_type="application/json; charset=utf-8",
+            content=csv_bytes,
+            media_type="text/csv; charset=utf-8",
             headers={
-                "Content-Disposition": f"attachment; filename=todos_{start_date}_{end_date}.json"
+                "Content-Disposition": f"attachment; filename=todos_{start_date}_{end_date}.csv"
             },
         )
-
-    # 默认 CSV：用 utf-8-sig 自动加 BOM，Excel 打开中文不乱码
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(headers)
-    for r in rows:
-        writer.writerow([r[k] for k in keys])
-    csv_bytes = buf.getvalue().encode("utf-8-sig")
-
-    return Response(
-        content=csv_bytes,
-        media_type="text/csv; charset=utf-8",
-        headers={
-            "Content-Disposition": f"attachment; filename=todos_{start_date}_{end_date}.csv"
-        },
-    )
+    except Exception as exc:
+        import traceback
+        err = f"导出失败: {type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+        print(err, flush=True)
+        return Response(
+            content=err.encode("utf-8", "replace"),
+            status_code=500,
+            media_type="text/plain; charset=utf-8",
+        )
 
 
 @router.get("/report")

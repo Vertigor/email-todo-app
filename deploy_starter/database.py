@@ -235,34 +235,44 @@ class Database:
         return [self._row_to_todo(row) for row in rows]
     
     def _row_to_todo(self, row) -> TodoItem:
-        """将数据库行转换为TodoItem对象"""
-        # 获取新增字段，兼容旧数据
-        def safe_get(key):
+        """将数据库行转换为TodoItem对象（兼容旧数据 / 脏数据）。"""
+
+        def safe_get(key, default=None):
             try:
                 return row[key]
             except (IndexError, KeyError):
-                return None
-        
-        source_email_date_str = safe_get('source_email_date')
-        
+                return default
+
+        def parse_dt(key, required=False):
+            """安全解析 ISO 日期字段；失败时返回 None，必填字段返回 datetime.min。"""
+            val = safe_get(key)
+            if not val:
+                return datetime.min if required else None
+            try:
+                return datetime.fromisoformat(val)
+            except (ValueError, TypeError):
+                print(f"[database] WARNING: invalid datetime for {key}: {val!r}")
+                return datetime.min if required else None
+
+        # 必填字符串字段兜底，避免旧数据 NULL 触发 Pydantic 校验失败
         return TodoItem(
-            id=row['id'],
-            title=row['title'],
-            description=row['description'],
-            due_date=datetime.fromisoformat(row['due_date']) if row['due_date'] else None,
-            created_at=datetime.fromisoformat(row['created_at']),
-            source_email_id=row['source_email_id'],
-            source_email_subject=row['source_email_subject'],
+            id=safe_get('id') or "",
+            title=safe_get('title') or "",
+            description=safe_get('description') or "",
+            due_date=parse_dt('due_date'),
+            created_at=parse_dt('created_at', required=True),
+            source_email_id=safe_get('source_email_id') or "",
+            source_email_subject=safe_get('source_email_subject') or "",
             source_email_from=safe_get('source_email_from'),
             source_email_to=safe_get('source_email_to'),
             source_email_cc=safe_get('source_email_cc'),
-            source_email_date=datetime.fromisoformat(source_email_date_str) if source_email_date_str else None,
+            source_email_date=parse_dt('source_email_date'),
             source_email_body=safe_get('source_email_body'),
+            completed=bool(safe_get('completed')),
+            completed_at=parse_dt('completed_at'),
+            deleted=bool(safe_get('deleted')) if safe_get('deleted') is not None else False,
+            deleted_at=parse_dt('deleted_at'),
             is_manual=bool(safe_get('is_manual')),
-            completed=bool(row['completed']),
-            completed_at=datetime.fromisoformat(row['completed_at']) if row['completed_at'] else None,
-            deleted=bool(row['deleted']) if row['deleted'] is not None else False,
-            deleted_at=datetime.fromisoformat(row['deleted_at']) if row['deleted_at'] else None
         )
 
     def get_todos_by_date_range(
