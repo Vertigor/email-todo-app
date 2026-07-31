@@ -24,8 +24,8 @@ os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 
 try:
-    from PyQt5.QtWidgets import QApplication, QMessageBox
-    from PyQt5.QtWebEngineWidgets import QWebEngineView
+    from PyQt5.QtWidgets import QApplication, QMessageBox, QFileDialog
+    from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineProfile
     from PyQt5.QtCore import QUrl, Qt
     # PyQt5 需要在创建 QApplication 前设置属性
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
@@ -34,8 +34,8 @@ try:
     PYQT_AVAILABLE = True
 except ImportError:
     try:
-        from PyQt6.QtWidgets import QApplication, QMessageBox
-        from PyQt6.QtWebEngineWidgets import QWebEngineView
+        from PyQt6.QtWidgets import QApplication, QMessageBox, QFileDialog
+        from PyQt6.QtWebEngineWidgets import QWebEngineView, QWebEngineProfile
         from PyQt6.QtCore import QUrl
         # PyQt6 默认启用高 DPI，不需要额外设置
         PYQT_VERSION = 6
@@ -87,27 +87,47 @@ def main():
             if i < max_retries - 1:
                 time.sleep(0.5)
     
-    # 启动GUI（如果可用）
-    if PYQT_AVAILABLE:
-        app_qt = QApplication(sys.argv)
-        
-        # 设置应用程序属性
-        app_qt.setApplicationName("邮箱待办助手")
-        
-        browser = QWebEngineView()
-        browser.setWindowTitle("邮箱待办助手")
-        browser.resize(1200, 800)
-        
-        # 加载前端页面
-        url = QUrl("http://localhost:18080/static/index.html")
-        browser.load(url)
-        browser.show()
-        
-        # PyQt5 使用 exec_(), PyQt6 使用 exec()
-        if PYQT_VERSION == 5:
-            sys.exit(app_qt.exec_())
-        else:
-            sys.exit(app_qt.exec())
+        # 启动GUI（如果可用）
+        if PYQT_AVAILABLE:
+            app_qt = QApplication(sys.argv)
+
+            # 设置应用程序属性
+            app_qt.setApplicationName("邮箱待办助手")
+
+            browser = QWebEngineView()
+            browser.setWindowTitle("邮箱待办助手")
+            browser.resize(1200, 800)
+
+            # 处理下载（导出 CSV/JSON、下载 Word 报告）：
+            # QtWebEngine 不会自动弹保存框，必须由宿主监听 downloadRequested。
+            # 否则前端的 <a download>/blob 下载会被静默丢弃（表现为"点了没反应"）。
+            def on_download_requested(download):
+                try:
+                    suggested = download.downloadFileName() or "download"
+                except Exception:
+                    suggested = "download"
+                path, _ = QFileDialog.getSaveFileName(
+                    browser, "保存文件", suggested, "所有文件 (*.*)"
+                )
+                if not path:
+                    download.cancel()
+                    return
+                download.setPath(path)
+                download.accept()
+
+            profile = QWebEngineProfile.defaultProfile()
+            profile.downloadRequested.connect(on_download_requested)
+
+            # 加载前端页面
+            url = QUrl("http://localhost:18080/static/index.html")
+            browser.load(url)
+            browser.show()
+
+            # PyQt5 使用 exec_(), PyQt6 使用 exec()
+            if PYQT_VERSION == 5:
+                sys.exit(app_qt.exec_())
+            else:
+                sys.exit(app_qt.exec())
     else:
         # 如果没有GUI，只运行服务器（不会到这里，因为打包时一定有 PyQt5）
         try:
