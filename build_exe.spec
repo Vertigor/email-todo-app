@@ -112,7 +112,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,  # 禁用 UPX：UPX 压缩 163MB 巨包会偶发压坏 Qt/QtWebEngine 二进制，导致 GUI 模式启动崩溃且 console=False 下无报错
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,  # 临时开启控制台查看错误

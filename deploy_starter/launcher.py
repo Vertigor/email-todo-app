@@ -19,6 +19,32 @@ if sys.stdout is None:
 if sys.stderr is None:
     sys.stderr = open(os.devnull, 'w')
 
+# ===== 致命错误记录：console=False 下崩溃完全无声，这里把错误写到日志文件并弹窗 =====
+import traceback as _tb
+def _log_fatal(msg):
+    try:
+        import tempfile
+        p = os.path.join(tempfile.gettempdir(), "EmailTodoApp_launch_error.log")
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(msg + "\n")
+    except Exception:
+        pass
+
+def _show_fatal(err_text):
+    """把启动错误写到日志，并尽量用对话框告知用户（不再无声崩溃）"""
+    _log_fatal(err_text)
+    try:
+        from PyQt5.QtWidgets import QApplication, QMessageBox
+        app = QApplication.instance() or QApplication(sys.argv)
+        QMessageBox.critical(None, "启动失败", err_text)
+    except Exception:
+        pass
+
+def _excepthook(et, ev, tb):
+    _log_fatal("".join(_tb.format_exception(et, ev, tb)))
+
+sys.excepthook = _excepthook
+
 # 设置高 DPI 支持（必须在导入 Qt 之前）
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
@@ -83,25 +109,36 @@ def main():
             response = requests.get("http://localhost:18080/health", timeout=1)
             if response.status_code == 200:
                 break
-        except:
+        except Exception:
             if i < max_retries - 1:
                 time.sleep(0.5)
-    
-        # 启动GUI（如果可用）
-        if PYQT_AVAILABLE:
-            app_qt = QApplication(sys.argv)
 
-            # 设置应用程序属性
-            app_qt.setApplicationName("邮箱待办助手")
+    # 启动GUI（如果可用）—— 注意：必须在等待循环的【外面】，
+    # 否则服务一就绪就 break 跳出循环，GUI 永远不会被创建，程序静默退出。
+    if PYQT_AVAILABLE:
+        app_qt = QApplication(sys.argv)
 
-            browser = QWebEngineView()
-            browser.setWindowTitle("邮箱待办助手")
-            browser.resize(1200, 800)
+        # 设置应用程序属性
+        app_qt.setApplicationName("邮箱待办助手")
 
-            # 处理下载（导出 CSV/JSON、下载 Word 报告）：
-            # QtWebEngine 不会自动弹保存框，必须由宿主监听 downloadRequested。
-            # 否则前端的 <a download>/blob 下载会被静默丢弃（表现为"点了没反应"）。
-            def on_download_requested(download):
+        browser = QWebEngineView()
+        browser.setWindowTitle("邮箱待办助手")
+        browser.resize(1200, 800)
+
+        # 处理下载（导出 CSV/JSON、下载 Word 报告）：
+        # QtWebEngine 不会自动弹保存框，必须由宿主监听 downloadRequested。
+        # 否则前端的 <a download>/blob 下载会被静默丢弃（表现为"点了没反应"）。
+        #
+        # 关键坑：downloadRequested 回调里的 download 对象只是局部参数，
+        # 回调一返回若没有任何强引用，Python 会立即 GC 掉它，Qt 侧的下载随之被
+        # 取消，结果"弹了保存框、选了路径，但磁盘上啥都没写"。
+        # 解决：用一个管理器类把 download 对象强引用住，挂 finished 信号收尾。
+        class DownloadManager:
+            def __init__(self):
+                # 强引用容器：防止 download 对象被 GC（只增不清，pending 数量很少）
+                self._keepalive = []
+
+            def handle(self, download):
                 try:
                     suggested = download.downloadFileName() or "download"
                 except Exception:
@@ -112,22 +149,65 @@ def main():
                 if not path:
                     download.cancel()
                     return
+                # 允许覆盖已有文件
+                try:
+                    download.setOverwriteMode(True)
+                except Exception:
+                    pass
                 download.setPath(path)
+                # 强引用 + 收尾信号，二者缺一不可
+                self._keepalive.append(download)
+                try:
+                    download.finished.connect(
+                        lambda: self._on_finished(download, path)
+                    )
+                    download.stateChanged.connect(
+                        lambda s: self._on_state(download, path, s)
+                    )
+                except Exception:
+                    pass
                 download.accept()
 
-            profile = QWebEngineProfile.defaultProfile()
-            profile.downloadRequested.connect(on_download_requested)
+            def _on_finished(self, download, path):
+                try:
+                    state = getattr(download, "isFinished", lambda: True)()
+                    err = None
+                    try:
+                        err = download.error() if hasattr(download, "error") else None
+                    except Exception:
+                        pass
+                    if err:
+                        _log_fatal(f"下载失败: {path} 错误码={err}")
+                    else:
+                        print(f"[download] 已完成: {path}")
+                except Exception as e:
+                    _log_fatal(f"下载收尾异常: {e}")
 
-            # 加载前端页面
-            url = QUrl("http://localhost:18080/static/index.html")
-            browser.load(url)
-            browser.show()
+            def _on_state(self, download, path, state):
+                # state==2 (DownloadCompleted) / 3 (DownloadCancelled) / 4 (DownloadInterrupted)
+                if state in (3, 4):
+                    try:
+                        err = download.error() if hasattr(download, "error") else None
+                    except Exception:
+                        err = None
+                    if state == 4 or err:
+                        _log_fatal(f"下载中断/失败: {path} state={state} err={err}")
 
-            # PyQt5 使用 exec_(), PyQt6 使用 exec()
-            if PYQT_VERSION == 5:
-                sys.exit(app_qt.exec_())
-            else:
-                sys.exit(app_qt.exec())
+        dl_manager = DownloadManager()
+
+        profile = QWebEngineProfile.defaultProfile()
+        profile.downloadRequested.connect(dl_manager.handle)
+
+        # 加载前端页面
+        url = QUrl("http://localhost:18080/static/index.html")
+        browser.load(url)
+        browser.show()
+
+        # PyQt5 使用 exec_(), PyQt6 使用 exec()
+        if PYQT_VERSION == 5:
+            sys.exit(app_qt.exec_())
+        else:
+            sys.exit(app_qt.exec())
     else:
         # 如果没有GUI，只运行服务器（不会到这里，因为打包时一定有 PyQt5）
         try:
@@ -138,4 +218,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        _show_fatal(
+            "程序启动失败：\n" + str(e)
+            + "\n\n详细错误已记录到："
+            + os.path.join(__import__("tempfile").gettempdir(), "EmailTodoApp_launch_error.log")
+            + "\n\n请把该日志内容发给我以便排查。"
+        )
